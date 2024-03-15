@@ -2,12 +2,28 @@ import sys, os
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget, QGridLayout, QLabel, QLineEdit, QFileDialog, QMessageBox, QListWidget, QInputDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
+from cryptography.fernet import Fernet
+
+with open("key.txt", "rb") as f:
+    cipher_key = f.read()
+cipher = Fernet(cipher_key)
+
+def encryptFile():
+    with open("users.txt", "rb") as f:        
+        encrypted_text = cipher.encrypt(f.read())
+    with open("C:/Users/Dzuiny/AppData/LocalLow/secret.txt", "wb") as f:
+        f.write(encrypted_text)
+    with open("users.txt", "w") as f:
+        f.truncate()
 
 username_to = ""
 
+# зашифрованный файл при выключенной проге, перезаписывать зашифрованный файл
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        self.myclose = False
 
         self.setWindowTitle("Система авторизации")
         self.setFixedSize(400, 130)
@@ -46,6 +62,29 @@ class MainWindow(QMainWindow):
         self.loginButton.clicked.connect(self.login)
         self.exitButton.clicked.connect(self.exit)
         self.count = 0
+    
+        if not os.path.exists("users.txt"):
+            with open("users.txt", "w") as f:
+                f.write(f"ADMIN,,False,0")
+        else:
+            password, ok = QInputDialog.getText(self, "Доступ к базе", "Введите пароль:", QLineEdit.Password)
+            if ok:
+                if password == "access":
+                    with open("C:/Users/Dzuiny/AppData/LocalLow/secret.txt", "rb") as f:        
+                        decrypted_text = cipher.decrypt(f.read()).decode()
+                    with open("users.txt", "w") as f:
+                        f.write(decrypted_text)
+                    with open("users.txt", "r") as f:
+                        lines = f.readlines()
+                    with open("users.txt", "w") as f:
+                        for line in lines:
+                            if line.strip():
+                                f.write(line)
+                else: 
+                    QMessageBox.warning(self, "Ошибка!", "Неверный пароль.")
+                    exit()
+            else:
+                exit()
 
     def login(self):
         global username_to
@@ -83,8 +122,15 @@ class MainWindow(QMainWindow):
                 if self.count == 3:
                     self.close()
 
+    def closeEvent(self, event):
+        if self.myclose:
+            encryptFile()		
+        else:
+            event.ignore()
+
     def exit(self):
-        self.close()
+        encryptFile()
+        exit()
 
     def showAdminInterface(self):
         self.adminWindow = AdminWindow()
@@ -97,6 +143,8 @@ class MainWindow(QMainWindow):
 class AdminWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        self.myclose = False
 
         self.setWindowTitle("Профиль администратора")
         self.setFixedSize(600, 400)
@@ -153,15 +201,24 @@ class AdminWindow(QMainWindow):
                 if line.split(",")[0] == "ADMIN":                    
                     if line.split(",")[1] == "":
                         self.changePasswordFirst()
+                        encryptFile()
+                        exit()
                         break
+
+    def closeEvent(self, event):
+        if self.myclose:
+            encryptFile()	
+        else:
+            event.ignore()
 
     def loadUserList(self):
         self.userListWidget.clear()
         with open("users.txt", "r") as f:
             for line in f:
-                username, password, blocked, length = line.strip().split(",")
-                user_info = username + "," + blocked + "," + length
-                self.userListWidget.addItem(user_info)
+                if line != "":
+                    username, password, blocked, length = line.strip().split(",")
+                    user_info = username + "," + blocked + "," + length
+                    self.userListWidget.addItem(user_info)
 
     def addUser(self):
         username, ok = QInputDialog.getText(self, "Добавление пользователя", "Введите имя:")
@@ -175,7 +232,7 @@ class AdminWindow(QMainWindow):
                         break                    
             if error == False:        
                 with open("users.txt", "a") as a:
-                    a.write(f"{username},,False,0\n")
+                    a.write(f"\r{username},,False,0")
 
         self.loadUserList()
 
@@ -247,7 +304,7 @@ class AdminWindow(QMainWindow):
     def changePasswordFirst(self):
         error = False
         username = "ADMIN"
-        password, ok = QInputDialog.getText(self, "Смена пароля", "Введите новый пароль:")
+        password, ok = QInputDialog.getText(self, "Смена пароля", "Введите новый пароль:", QLineEdit.Password)
         if ok:
             with open("users.txt", "r") as f:
                 lines = f.readlines()
@@ -262,11 +319,12 @@ class AdminWindow(QMainWindow):
                             error = True
                     f.write(line)
         if error == True:
+            encryptFile()            
             exit() 
 
     def changePassword(self):
         username = "ADMIN"
-        password_old, ok = QInputDialog.getText(self, "Смена пароля", "Введите текущий пароль:")
+        password_old, ok = QInputDialog.getText(self, "Смена пароля", "Введите текущий пароль:", QLineEdit.Password)
         if ok:
             with open("users.txt", "r") as f:
                 lines = f.readlines()
@@ -275,7 +333,7 @@ class AdminWindow(QMainWindow):
                     if line.split(",")[0] == username:
                         current_password = line.split(",")[1]
                         if current_password == password_old:
-                            password_new, ok = QInputDialog.getText(self, "Смена пароля", "Введите новый пароль:")
+                            password_new, ok = QInputDialog.getText(self, "Смена пароля", "Введите новый пароль:", QLineEdit.Password)
                             if len(password_new) > int(line.split(",")[3]):
                                 line = line.replace(f",{password_old},", f",{password_new},")                            
                                 QMessageBox.information(self, "Успех!", "Пароль изменен.")
@@ -283,10 +341,11 @@ class AdminWindow(QMainWindow):
                                 QMessageBox.warning(self,"Слишком короткий пароль!", "Пароль долже быть длиной более " + line.split(",")[3] + " символа(ов)")
                         else:
                             QMessageBox.warning(self, "Ошибка", "Неверный текущий пароль.")
-                        f.write(line)
+                    f.write(line)
 
     def exit(self):
-        self.close()
+        encryptFile()
+        exit()
 
 class UserWindow(QMainWindow):
     def __init__(self):
@@ -298,6 +357,13 @@ class UserWindow(QMainWindow):
                 if line.split(",")[0] == username_to:                    
                     if line.split(",")[1] == "":
                         self.changePasswordFirst()
+                        encryptFile()
+                        exit()
+                        break
+                    if len(line.split(",")[1]) <= int(line.split(",")[3]):
+                        self.changePassword()
+                        encryptFile()
+                        exit()
                         break
 
         self.setWindowTitle("Профиль пользователя")
@@ -322,11 +388,13 @@ class UserWindow(QMainWindow):
         self.exitButton.clicked.connect(self.exit)
 
     def exit(self):
-        self.close()
+        encryptFile()
+        exit()
 
     def changePasswordFirst(self):
         error = False
-        password, ok = QInputDialog.getText(self, "Смена пароля", "Введите новый пароль:")
+        password, ok = QInputDialog.getText(self, "Смена пароля", "Введите новый пароль:", QLineEdit.Password)
+        password2, ok = QInputDialog.getText(self, "Смена пароля", "Введите новый пароль повторно:", QLineEdit.Password)
         if ok:
             with open("users.txt", "r") as f:
                 lines = f.readlines()
@@ -334,17 +402,21 @@ class UserWindow(QMainWindow):
                 for line in lines:
                     if line.split(",")[0] == username_to:
                         if len(password) > int(line.split(",")[3]):
-                            line = line.replace(",,", f",{password},")                            
-                            QMessageBox.information(self, "Успех!", "Пароль изменен.")                               
+                            if password == password2:
+                                line = line.replace(",,", f",{password},")                            
+                                QMessageBox.information(self, "Успех!", "Пароль изменен.")
+                            else:
+                                QMessageBox.warning(self, "Ошибка!", "Пароли не совпадают!")                              
                         else:
                             QMessageBox.warning(self,"Слишком короткий пароль!", "Пароль долже быть длиной более " + line.split(",")[3] + " символа(ов)")
                             error = True
                     f.write(line)
         if error == True:
+            encryptFile()            
             exit() 
 
     def changePassword(self):
-        password_old, ok = QInputDialog.getText(self, "Смена пароля", "Введите текущий пароль:")
+        password_old, ok = QInputDialog.getText(self, "Смена пароля", "Введите текущий пароль:", QLineEdit.Password)
         if ok:
             with open("users.txt", "r") as f:
                 lines = f.readlines()
@@ -353,21 +425,21 @@ class UserWindow(QMainWindow):
                     if line.split(",")[0] == username_to:
                         current_password = line.split(",")[1]
                         if current_password == password_old:
-                            password_new, ok = QInputDialog.getText(self, "Смена пароля", "Введите новый пароль:")
+                            password_new, ok = QInputDialog.getText(self, "Смена пароля", "Введите новый пароль:", QLineEdit.Password)
+                            password_new2, ok = QInputDialog.getText(self, "Смена пароля", "Введите пароль повторно:", QLineEdit.Password)
                             if len(password_new) > int(line.split(",")[3]):
-                                line = line.replace(f",{password_old},", f",{password_new},")                            
-                                QMessageBox.information(self, "Успех!", "Пароль изменен.")
+                                if password_new == password_new2:
+                                    line = line.replace(f",{password_old},", f",{password_new},")                            
+                                    QMessageBox.information(self, "Успех!", "Пароль изменен.")
+                                else:
+                                    QMessageBox.warning(self, "Ошибка!", "Пароли не совпадают!")
                             else:
                                 QMessageBox.warning(self,"Слишком короткий пароль!", "Пароль долже быть длиной более " + line.split(",")[3] + " символа(ов)")
                         else:
-                            QMessageBox.warning(self, "Ошибка", "Неверный текущий пароль.")
-                        f.write(line)
+                            QMessageBox.warning(self, "Ошибка!", "Неверный текущий пароль.")
+                    f.write(line)
 
 if __name__ == "__main__":
-    if not os.path.exists("users.txt"):
-        with open("users.txt", "w") as f:
-            f.write(f"ADMIN,,False,0\n")
-
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
